@@ -11,7 +11,7 @@ from PIL import Image
 from .api import call_kontext_api
 
 # Debug flag - set to False to disable debug output
-DEBUG = True
+DEBUG = False
 
 # ComfyUI imports - use proper error handling
 def pil2tensor(image):
