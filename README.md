@@ -2,6 +2,9 @@
 
 A custom ComfyUI node for integrating with the Fal Kontext API for advanced image editing and generation.
 
+![image](https://github.com/user-attachments/assets/dd414939-49cc-4f78-a804-2497aa413a23)
+
+
 ## Features
 
 - **Image-to-Image Generation**: Transform images based on text prompts using Fal's Kontext model
