@@ -17,7 +17,7 @@ A custom ComfyUI node for integrating with the Fal Kontext API for advanced imag
 1. Clone this repository into your ComfyUI custom nodes directory:
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/yourusername/ComfyUI-Kontext-API.git
+git clone https://github.com/SanDiegoDude/ComfyUI-Kontext-API.git
 ```
 
 2. Install required dependencies:
