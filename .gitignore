@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# API keys and sensitive files
+.fal_key
+*.key
+*.pem
+*.secret
