@@ -39,7 +39,7 @@ def pil2tensor(image):
 class KontextAPINode:
     """
     Main node for calling the Fal Kontext API.
-    Inputs: prompt, image, seed, disable prompt enhancement.
+    Inputs: prompt, image, seed, aspect_ratio, disable prompt enhancement.
     Outputs: single output image, info, passed_nsfw_filtering.
     """
     @classmethod
@@ -49,6 +49,18 @@ class KontextAPINode:
                 "prompt": ("STRING", {"multiline": True, "default": ""}),
                 "image": ("IMAGE", {}),
                 "seed": ("INT", {"default": -1, "min": -1, "max": 2147483647}),
+                "aspect_ratio": ([
+                    "Match input image",
+                    "21:9",
+                    "16:9", 
+                    "4:3",
+                    "3:2",
+                    "1:1",
+                    "2:3",
+                    "3:4",
+                    "9:16",
+                    "9:21"
+                ], {"default": "Match input image"}),
             },
             "optional": {
                 "disable_prompt_enhancement": ("BOOLEAN", {"default": False}),
@@ -62,11 +74,12 @@ class KontextAPINode:
 
     CATEGORY = "image/generation"
 
-    def execute(self, prompt, image, seed, disable_prompt_enhancement=False):
+    def execute(self, prompt, image, seed, aspect_ratio, disable_prompt_enhancement=False):
         if DEBUG:
             print(f"[KontextAPINode] Input image shape: {image.shape}, dtype: {image.dtype}")
             print(f"[KontextAPINode] Prompt: {prompt}")
             print(f"[KontextAPINode] Seed: {seed}")
+            print(f"[KontextAPINode] Aspect Ratio: {aspect_ratio}")
         
         # Validate inputs
         if not prompt.strip():
@@ -79,15 +92,14 @@ class KontextAPINode:
             if DEBUG:
                 print(f"[KontextAPINode] Generated random seed: {seed}")
         
-        # Set hidden/default values for API call
-        aspect_ratio = None  # Always match input image
+        # Set values for API call
         guidance_scale = 3.5  # Default
         output_format = "jpeg"  # Not used, but required by API
         raw = disable_prompt_enhancement
         image_prompt_strength = 0.1  # Default
         num_inference_steps = 28  # Default
         safety_tolerance = 6  # Max safety
-        num_images = 1  # Always generate only 1 image
+        num_images = 1
         
         try:
             output_images, info, passed_nsfw_filtering = call_kontext_api(
