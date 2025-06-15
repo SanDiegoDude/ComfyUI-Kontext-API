@@ -6,6 +6,7 @@ import io
 import base64
 import torch
 import numpy as np
+from io import BytesIO
 
 # Import DEBUG flag from nodes
 try:
@@ -421,29 +422,42 @@ def upload_image_to_fal(image):
         print(f"[upload_image_to_fal] ERROR: {error_msg}")
         raise RuntimeError(error_msg)
 
-def call_kontext_max_api(prompt, images, aspect_ratio, num_images, seed, guidance_scale, output_format, raw, image_prompt_strength, num_inference_steps, safety_tolerance):
+def decode_base64_image(data_uri):
+    """Decode a base64 data URI to a PIL image."""
+    header, encoded = data_uri.split(',', 1)
+    img_bytes = base64.b64decode(encoded)
+    return Image.open(BytesIO(img_bytes))
+
+def call_kontext_max_api(prompt, images, aspect_ratio, seed, guidance_scale, output_format, raw, image_prompt_strength, num_inference_steps, safety_tolerance):
     """
-    Call the Fal Kontext Max API with multiple images and return output images and info string.
+    Call the Fal Kontext Max API with multiple images and return output images, info string, and NSFW status.
     """
     if fal_client is None:
+        # Try to import and get key again to show the proper error message
+        try:
+            from .utils import get_fal_key
+            get_fal_key()
+        except RuntimeError as e:
+            # This will show the detailed key error message
+            raise e
+        except:
+            pass
+        # If we're here, it's a different issue
         raise ImportError("fal_client is not installed. Please install fal-client in your environment with: pip install fal-client")
 
-    # Convert all images to data URIs
-    image_urls = []
-    for image in images:
-        if image is not None:  # Skip None images (optional inputs)
-            try:
-                data_uri = upload_image_to_fal(image)
-                image_urls.append(data_uri)
-            except Exception as e:
-                raise RuntimeError(f"Failed to process image: {str(e)}")
+    # Convert tensors to PIL images if needed and resize them
+    pil_images = []
+    for img in images:
+        pil_img = tensor2pil(img) if not isinstance(img, Image.Image) else img
+        pil_img = resize_to_max_pixels(pil_img)  # Resize if needed
+        pil_images.append(pil_img)
     
-    if not image_urls:
-        raise ValueError("At least one image must be provided")
+    # Convert PIL images to data URIs
+    image_urls = [image_to_data_uri(img, format='PNG') for img in pil_images]
     
     if DEBUG:
-        print(f"[call_kontext_max_api] Processed {len(image_urls)} images")
-        print(f"[call_kontext_max_api] Using data URIs for images")
+        print(f"[call_kontext_max_api] Input PIL images sizes: {[img.size for img in pil_images]}")
+        print(f"[call_kontext_max_api] Generated image_urls: (base64 images)")
     
     payload = {
         "prompt": prompt,
@@ -451,7 +465,7 @@ def call_kontext_max_api(prompt, images, aspect_ratio, num_images, seed, guidanc
         "safety_tolerance": str(safety_tolerance),
         "seed": int(seed),
         "guidance_scale": float(guidance_scale),
-        "num_images": int(num_images),
+        "num_images": 1,  # Always generate one image
         "output_format": output_format,
         "raw": bool(raw),
         "image_prompt_strength": float(image_prompt_strength),
@@ -463,7 +477,7 @@ def call_kontext_max_api(prompt, images, aspect_ratio, num_images, seed, guidanc
 
     if DEBUG:
         debug_payload = payload.copy()
-        debug_payload["image_urls"] = ["(BASE64 IMAGE)" for _ in image_urls]
+        debug_payload["image_urls"] = ["(base64 image)" for _ in image_urls]
         print(f"[call_kontext_max_api] Payload: {debug_payload}")
 
     logs = []
@@ -512,7 +526,7 @@ def call_kontext_max_api(prompt, images, aspect_ratio, num_images, seed, guidanc
         import traceback
         if DEBUG:
             print(f"[call_kontext_max_api] Full traceback:\n{traceback.format_exc()}")
-        return [], error_msg
+        return [], error_msg, False
 
     # Parse result
     output_images = []
@@ -545,10 +559,32 @@ def call_kontext_max_api(prompt, images, aspect_ratio, num_images, seed, guidanc
     if result_seed is not None:
         info_lines.append(f"Seed: {result_seed}")
     
-    if DEBUG:
-        print(f"[call_kontext_max_api] Parsing result...")
-        # Don't log the full result content as it contains base64 data
-        print(f"[call_kontext_max_api] Result received")
+    # Extract NSFW status
+    has_nsfw_concepts = None
+    if hasattr(result, 'has_nsfw_concepts'):
+        has_nsfw_concepts = result.has_nsfw_concepts
+    elif hasattr(result, '__getitem__'):
+        try:
+            has_nsfw_concepts = result.get('has_nsfw_concepts')
+        except:
+            pass
+    elif hasattr(result, 'data') and isinstance(result.data, dict):
+        has_nsfw_concepts = result.data.get('has_nsfw_concepts')
+    
+    # Check NSFW status - if any image is flagged, consider it blocked
+    if has_nsfw_concepts is not None:
+        if isinstance(has_nsfw_concepts, list):
+            passed_nsfw_filtering = not any(has_nsfw_concepts)
+        else:
+            passed_nsfw_filtering = not bool(has_nsfw_concepts)
+    
+    # Add NSFW status to info
+    nsfw_status = "✓ Passed" if passed_nsfw_filtering else "⚠️ Blocked"
+    info_lines.append(f"Safety Check: {nsfw_status}")
+    if has_nsfw_concepts is not None and isinstance(has_nsfw_concepts, list):
+        for i, nsfw in enumerate(has_nsfw_concepts):
+            status = "Blocked" if nsfw else "Passed"
+            info_lines.append(f"Image {i+1}: {status}")
     
     # Try to extract images from various possible response formats
     images_data = None
@@ -556,68 +592,56 @@ def call_kontext_max_api(prompt, images, aspect_ratio, num_images, seed, guidanc
     # Method 1: Direct attribute access
     if hasattr(result, 'images'):
         images_data = result.images
-        if DEBUG:
-            print(f"[call_kontext_max_api] Found images via result.images")
     # Method 2: Dictionary-style access
     elif hasattr(result, '__getitem__'):
         try:
             images_data = result.get('images') or result.get('output')
-            if DEBUG:
-                print(f"[call_kontext_max_api] Found images via result.get()")
         except:
             pass
     # Method 3: Data attribute
     elif hasattr(result, 'data'):
         if isinstance(result.data, dict):
-            images_data = result.data.get('images')
-            if DEBUG:
-                print(f"[call_kontext_max_api] Found images via result.data")
+            images_data = result.data.get('images') or result.data.get('output')
     
     if images_data:
-        if isinstance(images_data, list):
-            for img_data in images_data:
-                try:
-                    if isinstance(img_data, dict):
-                        # Handle both URL and base64 responses
-                        if 'url' in img_data:
-                            img_url = img_data['url']
-                            if img_url.startswith('data:image/'):
-                                # Handle base64 data URI
-                                img_data = img_url.split(',')[1]
-                                img_bytes = base64.b64decode(img_data)
-                                img = Image.open(io.BytesIO(img_bytes))
-                                output_images.append(img)
-                                if DEBUG:
-                                    print(f"[call_kontext_max_api] Successfully decoded base64 image from response")
-                            else:
-                                # Handle URL
-                                response = requests.get(img_url)
-                                if response.status_code == 200:
-                                    img = Image.open(io.BytesIO(response.content))
-                                    output_images.append(img)
-                                    if DEBUG:
-                                        print(f"[call_kontext_max_api] Successfully downloaded image from URL")
-                    elif isinstance(img_data, str) and img_data.startswith('data:image/'):
-                        # Handle direct base64 string
-                        img_data = img_data.split(',')[1]
-                        img_bytes = base64.b64decode(img_data)
-                        img = Image.open(io.BytesIO(img_bytes))
-                        output_images.append(img)
-                        if DEBUG:
-                            print(f"[call_kontext_max_api] Successfully decoded base64 image from string")
-                except Exception as e:
-                    print(f"[call_kontext_max_api] Failed to process image: {str(e)}")
+        # Process each image
+        for img_data in images_data:
+            try:
+                # Handle both direct URLs/URIs and dictionary format
+                if isinstance(img_data, dict):
+                    # Extract URL from dictionary format
+                    img_url = img_data.get('url', '')
+                    if not img_url:
+                        continue
+                    img_data = img_url
+                
+                if img_data.startswith("data:"):
+                    # Handle base64 data URI
+                    img = decode_base64_image(img_data)
+                elif img_data.startswith("http"):
+                    # Handle regular URL
+                    response = requests.get(img_data)
+                    response.raise_for_status()
+                    img = Image.open(BytesIO(response.content))
+                else:
+                    if DEBUG:
+                        print(f"[call_kontext_max_api] Skipping unknown image format: {img_data[:100]}...")
+                    continue
+                output_images.append(img)
+            except Exception as e:
+                if DEBUG:
+                    print(f"[call_kontext_max_api] Error processing image: {e}")
+                continue
     
-    # Add logs to info
+    # Add any logs to info
     if logs:
+        info_lines.append("\nLogs:")
         info_lines.extend(logs)
     
-    # Add NSFW status
-    if not passed_nsfw_filtering:
-        info_lines.append("WARNING: Output was flagged by NSFW filter")
+    # Join info lines
+    info = "\n".join(info_lines)
     
-    info_str = "\n".join(info_lines)
-    return output_images, info_str
+    return output_images, info, passed_nsfw_filtering
 
 class FalKontextMaxMultiImageNode:
     """Node for Fal Kontext Max API with multiple image inputs."""
@@ -629,7 +653,6 @@ class FalKontextMaxMultiImageNode:
                 "prompt": ("STRING", {"multiline": True}),
                 "image1": ("IMAGE",),
                 "aspect_ratio": (["Match input image", "1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21"],),
-                "num_images": ("INT", {"default": 1, "min": 1, "max": 4}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "guidance_scale": ("FLOAT", {"default": 3.5, "min": 0.0, "max": 20.0, "step": 0.1}),
                 "output_format": (["jpeg", "png"],),
@@ -645,52 +668,75 @@ class FalKontextMaxMultiImageNode:
             }
         }
     
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("images", "info")
+    RETURN_TYPES = ("IMAGE", "STRING", "BOOLEAN")
+    RETURN_NAMES = ("images", "info", "passed_nsfw_filtering")
     FUNCTION = "process"
     CATEGORY = "Fal/Kontext"
-    
-    def process(self, prompt, image1, aspect_ratio, num_images, seed, guidance_scale, output_format, 
+
+    def process(self, prompt, image1, aspect_ratio, seed, guidance_scale, output_format, 
                 disable_prompt_enhancement, image_prompt_strength, num_inference_steps, safety_tolerance, 
                 image2=None, image3=None, image4=None):
         # Collect all non-None images
-        images = [image1]
-        if image2 is not None:
-            images.append(image2)
-        if image3 is not None:
-            images.append(image3)
-        if image4 is not None:
-            images.append(image4)
+        images = [img for img in [image1, image2, image3, image4] if img is not None]
         
-        # Call the API
-        output_images, info = call_kontext_max_api(
+        # Call API with all images
+        output_images, info, passed_nsfw_filtering = call_kontext_max_api(
             prompt=prompt,
             images=images,
             aspect_ratio=aspect_ratio,
-            num_images=num_images,
             seed=seed,
             guidance_scale=guidance_scale,
             output_format=output_format,
-            raw=disable_prompt_enhancement,  # Map the new parameter name to the API parameter
+            raw=disable_prompt_enhancement,
             image_prompt_strength=image_prompt_strength,
             num_inference_steps=num_inference_steps,
             safety_tolerance=safety_tolerance
         )
         
+        # Check if we got any images back
+        if not output_images:
+            error_msg = "No images were generated. Check the info output for details."
+            if DEBUG:
+                print(f"[FalKontextMaxMultiImageNode] {error_msg}")
+            # Return a black image tensor of the same size as input for error cases
+            if len(images) > 0:
+                sample_img = tensor2pil(images[0])
+                width, height = sample_img.size
+                black_tensor = torch.zeros((1, height, width, 3), dtype=torch.float32)
+                return (black_tensor, f"{error_msg}\n\n{info}", False)
+            else:
+                black_tensor = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+                return (black_tensor, f"{error_msg}\n\n{info}", False)
+        
         # Convert PIL images to tensors
-        output_tensors = []
+        tensors = []
         for img in output_images:
-            # Convert PIL to numpy array
-            img_np = np.array(img)
-            # Convert to tensor (B, H, W, C) format
-            img_tensor = torch.from_numpy(img_np).float() / 255.0
-            img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
-            output_tensors.append(img_tensor)
+            try:
+                # Convert PIL to numpy array
+                img_np = np.array(img)
+                # Normalize to 0-1 range
+                img_np = img_np.astype(np.float32) / 255.0
+                # Convert to tensor and add batch dimension
+                img_tensor = torch.from_numpy(img_np).unsqueeze(0)
+                tensors.append(img_tensor)
+            except Exception as e:
+                if DEBUG:
+                    print(f"[FalKontextMaxMultiImageNode] Error converting image to tensor: {e}")
+                continue
         
-        # Stack tensors if multiple images
-        if len(output_tensors) > 1:
-            output_tensor = torch.cat(output_tensors, dim=0)
-        else:
-            output_tensor = output_tensors[0]
+        # Check if we have any valid tensors
+        if not tensors:
+            error_msg = "Failed to convert generated images to tensors. Check the info output for details."
+            if DEBUG:
+                print(f"[FalKontextMaxMultiImageNode] {error_msg}")
+            if len(images) > 0:
+                sample_img = tensor2pil(images[0])
+                width, height = sample_img.size
+                black_tensor = torch.zeros((1, height, width, 3), dtype=torch.float32)
+                return (black_tensor, f"{error_msg}\n\n{info}", False)
+            else:
+                black_tensor = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+                return (black_tensor, f"{error_msg}\n\n{info}", False)
         
-        return (output_tensor, info) 
+        # Since we're always generating one image, just return the first tensor
+        return (tensors[0], info, passed_nsfw_filtering) 

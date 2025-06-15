@@ -96,6 +96,10 @@ Both nodes provide:
   - Seed used for generation
   - Safety check status (✓ passed or ⚠️ blocked)
   - Any error messages or warnings
+- **passed_nsfw_filtering** (BOOLEAN): True if content passed safety checks, False if blocked
+  - Designed to work with "save on true" nodes in ComfyUI
+  - Returns True for safe content that should be saved
+  - Returns False for blocked content that should be skipped
 
 ## Example Prompts
 
