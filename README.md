@@ -11,6 +11,8 @@ A custom ComfyUI node for integrating with the Fal Kontext API for advanced imag
 - **Single Image Output**: Generates one image per request for optimal ComfyUI compatibility
 - **Seed Control**: Use specific seeds for reproducible results or -1 for random
 - **Prompt Enhancement**: Optional AI prompt enhancement (can be disabled)
+- **Multi-Image Support**: Process multiple images (1 required, up to 3 optional) with the Kontext Max model
+- **Automatic Image Resizing**: Large images are automatically resized to fit under 1.25MP
 
 ## Installation
 
@@ -52,32 +54,48 @@ export FAL_KEY="your_fal_api_key_here"
 
 ## Usage
 
-1. Find the **Fal Kontext API** node in the `image/generation` category
-2. Connect an input image to the `image` input
+1. Find either node in the `image/generation` category:
+   - **Fal Kontext API**: For single image processing
+   - **Fal Kontext[Max] Multi-Image API**: For processing multiple images
+2. Connect your input image(s):
+   - Single node: Connect one image to the `image` input
+   - Multi node: Connect 1-4 images to `image1` through `image4` inputs
 3. Enter your prompt describing the desired transformation
-4. Adjust settings:
-   - **seed**: Specific seed for reproducibility (-1 for random)
-   - **disable_prompt_enhancement**: Turn off AI prompt enhancement if needed
+4. Adjust settings as needed
 
 ## Node Inputs
 
+### Fal Kontext API (Single Image)
 - **prompt** (STRING): Text description of the desired image transformation
 - **image** (IMAGE): Input image to transform
 - **seed** (INT): Random seed (-1 for random, default: -1)
 - **disable_prompt_enhancement** (BOOLEAN): Disable AI prompt enhancement (default: False)
 
+### Fal Kontext[Max] Multi-Image API
+- **prompt** (STRING): Text description of the desired image transformation
+- **image1** (IMAGE): Required input image
+- **image2** (IMAGE, optional): Additional input image
+- **image3** (IMAGE, optional): Additional input image
+- **image4** (IMAGE, optional): Additional input image
+- **aspect_ratio** (COMBO): Output image aspect ratio
+- **num_images** (INT): Number of images to generate (1-4)
+- **seed** (INT): Random seed (-1 for random, default: -1)
+- **guidance_scale** (FLOAT): How closely to follow the prompt (default: 3.5)
+- **output_format** (COMBO): Output image format (jpeg/png)
+- **disable_prompt_enhancement** (BOOLEAN): Disable AI prompt enhancement (default: False)
+- **image_prompt_strength** (FLOAT): Strength of image influence (0-1, default: 0.1)
+- **num_inference_steps** (INT): Number of generation steps (default: 30)
+- **safety_tolerance** (COMBO): NSFW filter tolerance (1-6, default: 6)
+
 ## Node Outputs
 
-- **image** (IMAGE): Generated image as a single tensor
+Both nodes provide:
+- **image** (IMAGE): Generated image(s) as tensor(s)
 - **info** (STRING): API response information including:
   - Request ID
   - Seed used for generation
   - Safety check status (✓ passed or ⚠️ blocked)
   - Any error messages or warnings
-- **passed_nsfw_filtering** (BOOLEAN): True if content passed safety checks, False if blocked
-  - Designed to work with "save on true" nodes in ComfyUI
-  - Returns True for safe content that should be saved
-  - Returns False for blocked content that should be skipped
 
 ## Example Prompts
 
