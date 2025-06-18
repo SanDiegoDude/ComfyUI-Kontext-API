@@ -13,6 +13,7 @@ A custom ComfyUI node for integrating with the Fal Kontext API for advanced imag
 - **Prompt Enhancement**: Optional AI prompt enhancement (can be disabled)
 - **Multi-Image Support**: Process multiple images (1 required, up to 3 optional) with the Kontext Max model
 - **Automatic Image Resizing**: Large images are automatically resized to fit under 1.25MP
+- **Fal Storage Integration**: Images are automatically uploaded to Fal's storage service to avoid API size limits
 
 ## Installation
 
@@ -56,12 +57,23 @@ export FAL_KEY="your_fal_api_key_here"
 
 1. Find either node in the `image/generation` category:
    - **Fal Kontext API**: For single image processing
-   - **Fal Kontext[Max] Multi-Image API**: For processing multiple images
+   - **Fal Kontext Max (Multi-Image)**: For processing multiple images
 2. Connect your input image(s):
    - Single node: Connect one image to the `image` input
    - Multi node: Connect 1-4 images to `image1` through `image4` inputs
 3. Enter your prompt describing the desired transformation
 4. Adjust settings as needed
+
+## Technical Details
+
+### Image Upload System
+To avoid API size limits when processing multiple images, this node automatically:
+1. Resizes images to fit under 1.25MP (1,250,000 pixels)
+2. Uploads images to Fal's storage service using `fal_client.upload_file()`
+3. Uses the returned URLs instead of base64 data in API calls
+4. Cleans up temporary files after upload
+
+This approach ensures reliable processing of multiple images without hitting the 4MB payload limit.
 
 ## Node Inputs
 
@@ -71,15 +83,14 @@ export FAL_KEY="your_fal_api_key_here"
 - **seed** (INT): Random seed (-1 for random, default: -1)
 - **disable_prompt_enhancement** (BOOLEAN): Disable AI prompt enhancement (default: False)
 
-### Fal Kontext[Max] Multi-Image API
+### Fal Kontext Max (Multi-Image)
 - **prompt** (STRING): Text description of the desired image transformation
 - **image1** (IMAGE): Required input image
 - **image2** (IMAGE, optional): Additional input image
 - **image3** (IMAGE, optional): Additional input image
 - **image4** (IMAGE, optional): Additional input image
 - **aspect_ratio** (COMBO): Output image aspect ratio
-- **num_images** (INT): Number of images to generate (1-4)
-- **seed** (INT): Random seed (-1 for random, default: -1)
+- **seed** (INT): Random seed (0 for random, default: 0)
 - **guidance_scale** (FLOAT): How closely to follow the prompt (default: 3.5)
 - **output_format** (COMBO): Output image format (jpeg/png)
 - **disable_prompt_enhancement** (BOOLEAN): Disable AI prompt enhancement (default: False)
@@ -109,6 +120,20 @@ Both nodes provide:
 - "It's now snowing, everything is covered in snow"
 - "Using this style, a bunny, a dog and a cat are having a tea party"
 
+## Testing
+
+You can test the upload functionality using the included test script:
+
+```bash
+cd ComfyUI-Kontext-API
+python test_upload.py
+```
+
+This will verify that:
+- The API key is properly configured
+- Images can be uploaded to Fal storage
+- Tensor conversions work correctly
+
 ## Troubleshooting
 
 ### Debug Mode
@@ -127,6 +152,12 @@ If you see an error like "FAL API KEY NOT FOUND!", follow these steps:
 1. Make sure you have created the `.fal_key` file in the `ComfyUI-Kontext-API` directory (not in ComfyUI root)
 2. Check that the file contains only your API key with no extra spaces or quotes
 3. Verify the key is valid by testing it on [fal.ai](https://fal.ai/)
+
+### Upload Issues
+If you encounter upload errors:
+1. Ensure you have a stable internet connection
+2. Check that your Fal API key has sufficient credits
+3. Verify the fal-client package is up to date: `pip install --upgrade fal-client`
 
 ### Dependencies
 Make sure you have installed all required packages:

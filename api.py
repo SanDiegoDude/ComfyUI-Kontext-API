@@ -1,12 +1,13 @@
 import os
 import requests
-from .utils import get_fal_key, image_to_data_uri
+from .utils import get_fal_key
 from PIL import Image
 import io
 import base64
 import torch
 import numpy as np
 from io import BytesIO
+import tempfile
 
 # Import DEBUG flag from nodes
 try:
@@ -116,11 +117,20 @@ def call_kontext_api(prompt, image, aspect_ratio, num_images, seed, guidance_sca
 
     # Convert tensor to PIL image if needed
     pil_image = tensor2pil(image) if not isinstance(image, Image.Image) else image
-    image_url = image_to_data_uri(pil_image, format='PNG')
+    
+    # Upload image to Fal storage instead of converting to base64
+    try:
+        image_url = upload_image_to_fal(pil_image)
+        if DEBUG:
+            print(f"[call_kontext_api] Uploaded image to: {image_url}")
+    except Exception as e:
+        error_msg = f"Failed to upload image: {str(e)}"
+        print(f"[call_kontext_api] ERROR: {error_msg}")
+        raise RuntimeError(error_msg)
     
     if DEBUG:
         print(f"[call_kontext_api] Input PIL image size: {pil_image.size}, mode: {pil_image.mode}")
-        print(f"[call_kontext_api] Generated image_url: (base64 image)")
+        print(f"[call_kontext_api] Uploaded image URL: {image_url}")
     
     payload = {
         "prompt": prompt,
@@ -140,7 +150,7 @@ def call_kontext_api(prompt, image, aspect_ratio, num_images, seed, guidance_sca
 
     if DEBUG:
         debug_payload = payload.copy()
-        debug_payload["image_url"] = "(base64 image)"
+        debug_payload["image_url"] = image_url  # Show actual URL for debugging
         print(f"[call_kontext_api] Payload: {debug_payload}")
 
     logs = []
@@ -403,24 +413,38 @@ def upload_image_to_fal(image):
     # Resize image if needed
     pil_image = resize_to_max_pixels(pil_image)
     
-    # Convert PIL image to bytes
-    img_byte_arr = io.BytesIO()
-    pil_image.save(img_byte_arr, format='PNG')
-    img_byte_arr = img_byte_arr.getvalue()
-    
+    # Save to temporary file
+    temp_file = None
     try:
-        # Convert to base64 data URI
-        base64_data = base64.b64encode(img_byte_arr).decode('utf-8')
-        data_uri = f"data:image/png;base64,{base64_data}"
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            pil_image.save(tmp, format='PNG')
+            temp_file = tmp.name
         
         if DEBUG:
-            print(f"[upload_image_to_fal] Converted image to data URI")
+            print(f"[upload_image_to_fal] Saved image to temp file: {temp_file}")
         
-        return data_uri
+        # Upload to Fal storage
+        url = fal_client.upload_file(temp_file)
+        
+        if DEBUG:
+            print(f"[upload_image_to_fal] Uploaded image to Fal storage: {url}")
+        
+        return url
+        
     except Exception as e:
-        error_msg = f"Failed to convert image to data URI: {str(e)}"
+        error_msg = f"Failed to upload image to Fal storage: {str(e)}"
         print(f"[upload_image_to_fal] ERROR: {error_msg}")
         raise RuntimeError(error_msg)
+    finally:
+        # Clean up temp file
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+                if DEBUG:
+                    print(f"[upload_image_to_fal] Cleaned up temp file: {temp_file}")
+            except Exception as e:
+                if DEBUG:
+                    print(f"[upload_image_to_fal] Warning: Failed to clean up temp file {temp_file}: {e}")
 
 def decode_base64_image(data_uri):
     """Decode a base64 data URI to a PIL image."""
@@ -452,12 +476,22 @@ def call_kontext_max_api(prompt, images, aspect_ratio, seed, guidance_scale, out
         pil_img = resize_to_max_pixels(pil_img)  # Resize if needed
         pil_images.append(pil_img)
     
-    # Convert PIL images to data URIs
-    image_urls = [image_to_data_uri(img, format='PNG') for img in pil_images]
+    # Upload images to Fal storage instead of converting to base64
+    image_urls = []
+    for i, pil_img in enumerate(pil_images):
+        try:
+            url = upload_image_to_fal(pil_img)
+            image_urls.append(url)
+            if DEBUG:
+                print(f"[call_kontext_max_api] Uploaded image {i+1} to: {url}")
+        except Exception as e:
+            error_msg = f"Failed to upload image {i+1}: {str(e)}"
+            print(f"[call_kontext_max_api] ERROR: {error_msg}")
+            raise RuntimeError(error_msg)
     
     if DEBUG:
         print(f"[call_kontext_max_api] Input PIL images sizes: {[img.size for img in pil_images]}")
-        print(f"[call_kontext_max_api] Generated image_urls: (base64 images)")
+        print(f"[call_kontext_max_api] Uploaded image URLs: {image_urls}")
     
     payload = {
         "prompt": prompt,
@@ -477,7 +511,7 @@ def call_kontext_max_api(prompt, images, aspect_ratio, seed, guidance_scale, out
 
     if DEBUG:
         debug_payload = payload.copy()
-        debug_payload["image_urls"] = ["(base64 image)" for _ in image_urls]
+        debug_payload["image_urls"] = image_urls  # Show actual URLs for debugging
         print(f"[call_kontext_max_api] Payload: {debug_payload}")
 
     logs = []

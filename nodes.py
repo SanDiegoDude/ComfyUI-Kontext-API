@@ -8,7 +8,7 @@ from typing import Any, Dict
 import torch
 import numpy as np
 from PIL import Image
-from .api import call_kontext_api
+from .api import call_kontext_api, FalKontextMaxMultiImageNode
 
 # Debug flag - set to False to disable debug output
 DEBUG = False
@@ -140,8 +140,10 @@ class KontextAPINode:
 # Add these for ComfyUI node discovery
 NODE_CLASS_MAPPINGS = {
     "KontextAPINode": KontextAPINode,
+    "FalKontextMaxMultiImageNode": FalKontextMaxMultiImageNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KontextAPINode": "Fal Kontext API",
+    "FalKontextMaxMultiImageNode": "Fal Kontext Max (Multi-Image)",
 } 
