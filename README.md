@@ -2,7 +2,11 @@
 
 A custom ComfyUI node for integrating with the Fal Kontext API for advanced image editing and generation.
 
+**SINGLE IMAGE NODE**
 ![image](https://github.com/user-attachments/assets/dd414939-49cc-4f78-a804-2497aa413a23)
+
+**MULTI-IMAGE NODE**
+![image](https://github.com/user-attachments/assets/b1eaf955-a2d7-4b62-95b3-bbab0eaee64d)
 
 
 ## Features
